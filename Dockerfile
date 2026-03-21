@@ -18,7 +18,7 @@ COPY src ./src
 RUN npm run build
 
 # Production stage
-FROM node:20-alpine
+FROM node:20-alpine AS production
 
 # Install wget for healthcheck
 RUN apk add --no-cache wget
@@ -26,14 +26,12 @@ RUN apk add --no-cache wget
 # Set working directory
 WORKDIR /app
 
-# Copy package files
-COPY package*.json ./
+# Copy package files and built application from builder stage
+COPY --from=builder /app/package.json /app/package-lock.json ./
+COPY --from=builder /app/build ./build
 
 # Install production dependencies only
-RUN npm ci --only=production
-
-# Copy built application from builder stage
-COPY --from=builder /app/build ./build
+RUN npm ci --omit=dev
 
 # Set NODE_ENV to production
 ENV NODE_ENV=production
