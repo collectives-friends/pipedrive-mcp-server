@@ -391,9 +391,10 @@ server.tool(
   "Get detailed notes and custom booking details for a specific deal",
   {
     dealId: z.number().describe("Pipedrive deal ID"),
-    limit: z.number().optional().describe("Maximum number of notes to return (default: 20)")
+    limit: z.number().optional().describe("Maximum number of notes to return (default: 20)"),
+    start: z.number().optional().describe("Pagination start index (default: 0). Use with limit to paginate through notes.")
   },
-  async ({ dealId, limit = 20 }) => {
+  async ({ dealId, limit = 20, start = 0 }) => {
     try {
       const result: any = {
         deal_id: dealId,
@@ -423,7 +424,8 @@ server.tool(
         // @ts-ignore - Bypass incorrect TypeScript definition
         const notesResponse = await notesApi.getNotes({
           deal_id: dealId,
-          limit: limit
+          limit: limit,
+          start: start
         });
         result.notes = notesResponse.data || [];
       } catch (noteError) {
@@ -435,7 +437,13 @@ server.tool(
         content: [{
           type: "text",
           text: JSON.stringify({
-            summary: `Retrieved ${result.notes.length} notes and booking details for deal ${dealId}`,
+            summary: `Retrieved ${result.notes.length} notes for deal ${dealId} (start: ${start}, limit: ${limit})`,
+            pagination: {
+              start: start,
+              limit: limit,
+              returned: result.notes.length,
+              has_more: result.notes.length === limit
+            },
             ...result
           }, null, 2)
         }]
