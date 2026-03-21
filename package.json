@@ -10,9 +10,9 @@
     "dev": "node --import tsx src/index.ts"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.7.1",
-    "dotenv": "^16.4.7",
+    "@modelcontextprotocol/sdk": "^1.27.1",
     "bottleneck": "^2.19.5",
+    "dotenv": "^16.4.7",
     "jsonwebtoken": "^9.0.2",
     "pipedrive": "^22.10.1",
     "ts-node": "^10.9.2",

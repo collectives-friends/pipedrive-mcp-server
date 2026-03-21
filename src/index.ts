@@ -1,12 +1,15 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
+import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import * as pipedrive from "pipedrive";
 import * as dotenv from 'dotenv';
 import Bottleneck from 'bottleneck';
 import jwt from 'jsonwebtoken';
 import http from 'http';
+import crypto from 'crypto';
 
 // Type for error handling
 interface ErrorWithMessage {
@@ -131,15 +134,13 @@ const notesApi = withRateLimit(new pipedrive.NotesApi(apiClient));
 // @ts-ignore - UsersApi exists but may not be in type definitions
 const usersApi = withRateLimit(new pipedrive.UsersApi(apiClient));
 
-// Create MCP server
+// Factory to create a fully configured MCP server instance.
+// A new instance is needed per transport connection (SDK requirement).
+function createServer(): McpServer {
+
 const server = new McpServer({
   name: "pipedrive-mcp-server",
-  version: "1.0.2",
-  capabilities: {
-    resources: {},
-    tools: {},
-    prompts: {}
-  }
+  version: "1.0.4",
 });
 
 // === TOOLS ===
@@ -183,6 +184,7 @@ server.tool(
 );
 
 // Get deals with flexible filtering options
+// @ts-ignore - Type instantiation depth issue with complex zod schema
 server.tool(
   "get-deals",
   "Get deals from Pipedrive with flexible filtering options including search by title, date range, owner, stage, status, and more. Use 'get-users' tool first to find owner IDs.",
@@ -462,6 +464,7 @@ server.tool(
 );
 
 // Search deals
+// @ts-ignore - Type instantiation depth issue with complex zod schema
 server.tool(
   "search-deals",
   "Search deals by term",
@@ -968,24 +971,181 @@ server.prompt(
   })
 );
 
+return server;
+} // end createServer
+
 // Get transport type from environment variable (default to stdio)
 const transportType = process.env.MCP_TRANSPORT || 'stdio';
 
-if (transportType === 'sse') {
-  // SSE transport - create HTTP server
+if (transportType === 'sse' || transportType === 'http') {
+  // HTTP transport - supports both Streamable HTTP (/mcp) and legacy SSE (/sse + /message)
   const port = parseInt(process.env.MCP_PORT || '3000', 10);
-  const endpoint = process.env.MCP_ENDPOINT || '/message';
+  const sseEndpoint = process.env.MCP_ENDPOINT || '/message';
 
   // Store active transports by session ID
-  const transports = new Map<string, SSEServerTransport>();
+  const transports = new Map<string, SSEServerTransport | StreamableHTTPServerTransport>();
+
+  // Parse JSON body from an IncomingMessage
+  function parseJsonBody(req: http.IncomingMessage): Promise<unknown> {
+    return new Promise((resolve, reject) => {
+      let body = '';
+      req.on('data', (chunk: Buffer) => { body += chunk.toString(); });
+      req.on('end', () => {
+        try { resolve(JSON.parse(body)); }
+        catch (e) { reject(e); }
+      });
+      req.on('error', reject);
+    });
+  }
+
+  // --- Streamable HTTP handlers (/mcp) ---
+
+  async function handleStreamablePost(req: http.IncomingMessage, res: http.ServerResponse) {
+    const sessionId = req.headers['mcp-session-id'] as string | undefined;
+    let body: unknown;
+    try {
+      body = await parseJsonBody(req);
+    } catch {
+      res.writeHead(400, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Invalid JSON body' }));
+      return;
+    }
+
+    // New session: initialize request without session ID
+    if (!sessionId && isInitializeRequest(body)) {
+      const transport = new StreamableHTTPServerTransport({
+        sessionIdGenerator: () => crypto.randomUUID(),
+        onsessioninitialized: (id) => {
+          transports.set(id, transport);
+          console.error(`Streamable HTTP session initialized: ${id}`);
+        }
+      });
+
+      transport.onclose = () => {
+        if (transport.sessionId) {
+          console.error(`Streamable HTTP session closed: ${transport.sessionId}`);
+          transports.delete(transport.sessionId);
+        }
+      };
+
+      const mcpServer = createServer();
+      await mcpServer.connect(transport);
+      await transport.handleRequest(req, res, body);
+      return;
+    }
+
+    // Existing session
+    if (sessionId) {
+      const transport = transports.get(sessionId);
+      if (!transport || !(transport instanceof StreamableHTTPServerTransport)) {
+        res.writeHead(404, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Session not found' }));
+        return;
+      }
+      await transport.handleRequest(req, res, body);
+      return;
+    }
+
+    res.writeHead(400, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'Missing mcp-session-id header or not an initialization request' }));
+  }
+
+  async function handleStreamableGet(req: http.IncomingMessage, res: http.ServerResponse) {
+    const sessionId = req.headers['mcp-session-id'] as string | undefined;
+    if (!sessionId) {
+      res.writeHead(400, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Missing mcp-session-id header' }));
+      return;
+    }
+
+    const transport = transports.get(sessionId);
+    if (!transport || !(transport instanceof StreamableHTTPServerTransport)) {
+      res.writeHead(404, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Session not found' }));
+      return;
+    }
+
+    await transport.handleRequest(req, res);
+  }
+
+  async function handleStreamableDelete(req: http.IncomingMessage, res: http.ServerResponse) {
+    const sessionId = req.headers['mcp-session-id'] as string | undefined;
+    if (!sessionId) {
+      res.writeHead(400, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Missing mcp-session-id header' }));
+      return;
+    }
+
+    const transport = transports.get(sessionId);
+    if (!transport || !(transport instanceof StreamableHTTPServerTransport)) {
+      res.writeHead(404, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Session not found' }));
+      return;
+    }
+
+    await transport.handleRequest(req, res);
+  }
+
+  // --- Legacy SSE handlers (/sse + /message) ---
+
+  async function handleLegacySseGet(req: http.IncomingMessage, res: http.ServerResponse) {
+    console.error('New SSE connection request');
+    const transport = new SSEServerTransport(sseEndpoint, res);
+
+    transports.set(transport.sessionId, transport);
+
+    transport.onclose = () => {
+      console.error(`SSE connection closed: ${transport.sessionId}`);
+      transports.delete(transport.sessionId);
+    };
+
+    try {
+      const mcpServer = createServer();
+      await mcpServer.connect(transport);
+      console.error(`SSE connection established: ${transport.sessionId}`);
+    } catch (err) {
+      console.error('Failed to establish SSE connection:', err);
+      transports.delete(transport.sessionId);
+    }
+  }
+
+  async function handleLegacySsePost(req: http.IncomingMessage, res: http.ServerResponse) {
+    const url = new URL(req.url!, `http://${req.headers.host}`);
+    const sessionId = url.searchParams.get('sessionId') || req.headers['x-session-id'] as string;
+
+    if (!sessionId) {
+      res.writeHead(400, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Missing sessionId' }));
+      return;
+    }
+
+    const transport = transports.get(sessionId);
+    if (!transport || !(transport instanceof SSEServerTransport)) {
+      res.writeHead(404, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Session not found' }));
+      return;
+    }
+
+    try {
+      await transport.handlePostMessage(req, res);
+    } catch (err) {
+      console.error('Error handling POST message:', err);
+      if (!res.headersSent) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Internal server error' }));
+      }
+    }
+  }
+
+  // --- HTTP Server ---
 
   const httpServer = http.createServer(async (req, res) => {
     const url = new URL(req.url!, `http://${req.headers.host}`);
 
     // Enable CORS
     res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Session-Id');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Session-Id, Mcp-Session-Id');
 
     if (req.method === 'OPTIONS') {
       res.writeHead(204);
@@ -993,96 +1153,71 @@ if (transportType === 'sse') {
       return;
     }
 
-    if (req.method === 'GET' && url.pathname === '/sse') {
+    // Auth check for all non-OPTIONS, non-health requests
+    if (url.pathname !== '/health') {
       const authResult = verifyRequestAuthentication(req);
       if (!authResult.ok) {
         res.writeHead(authResult.status, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ error: authResult.message }));
         return;
       }
+    }
 
-      // Establish SSE connection
-      console.error('New SSE connection request');
-      const transport = new SSEServerTransport(endpoint, res);
-
-      // Store transport by session ID
-      transports.set(transport.sessionId, transport);
-
-      transport.onclose = () => {
-        console.error(`SSE connection closed: ${transport.sessionId}`);
-        transports.delete(transport.sessionId);
-      };
-
-      try {
-        await server.connect(transport);
-        console.error(`SSE connection established: ${transport.sessionId}`);
-      } catch (err) {
-        console.error('Failed to establish SSE connection:', err);
-        transports.delete(transport.sessionId);
-      }
-    } else if (req.method === 'POST' && url.pathname === endpoint) {
-      const authResult = verifyRequestAuthentication(req);
-      if (!authResult.ok) {
-        res.writeHead(authResult.status, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: authResult.message }));
-        return;
-      }
-
-      // Handle incoming message
-      const sessionId = url.searchParams.get('sessionId') || req.headers['x-session-id'] as string;
-
-      if (!sessionId) {
-        res.writeHead(400, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: 'Missing sessionId' }));
-        return;
-      }
-
-      const transport = transports.get(sessionId);
-      if (!transport) {
-        res.writeHead(404, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: 'Session not found' }));
-        return;
-      }
-
-      req.on('error', err => {
-        console.error('Error receiving POST message body:', err);
-        if (!res.headersSent) {
-          res.writeHead(400, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ error: 'Invalid request body' }));
+    try {
+      // Streamable HTTP endpoint (/mcp)
+      if (url.pathname === '/mcp') {
+        if (req.method === 'POST') {
+          await handleStreamablePost(req, res);
+        } else if (req.method === 'GET') {
+          await handleStreamableGet(req, res);
+        } else if (req.method === 'DELETE') {
+          await handleStreamableDelete(req, res);
+        } else {
+          res.writeHead(405);
+          res.end('Method not allowed');
         }
-      });
-
-      try {
-        await transport.handlePostMessage(req, res);
-      } catch (err) {
-        console.error('Error handling POST message:', err);
-        if (!res.headersSent) {
-          res.writeHead(500, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ error: 'Internal server error' }));
-        }
+        return;
       }
-    } else {
-      // Health check endpoint
+
+      // Legacy SSE endpoints (/sse + /message)
+      if (req.method === 'GET' && url.pathname === '/sse') {
+        await handleLegacySseGet(req, res);
+        return;
+      }
+
+      if (req.method === 'POST' && url.pathname === sseEndpoint) {
+        await handleLegacySsePost(req, res);
+        return;
+      }
+
+      // Health check
       if (req.method === 'GET' && url.pathname === '/health') {
         res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ status: 'ok', transport: 'sse' }));
+        res.end(JSON.stringify({ status: 'ok', transports: ['streamable-http', 'sse'] }));
         return;
       }
 
       res.writeHead(404);
       res.end('Not found');
+    } catch (err) {
+      console.error('Unhandled error:', err);
+      if (!res.headersSent) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Internal server error' }));
+      }
     }
   });
 
   httpServer.listen(port, () => {
-    console.error(`Pipedrive MCP Server (SSE) listening on port ${port}`);
-    console.error(`SSE endpoint: http://localhost:${port}/sse`);
-    console.error(`Message endpoint: http://localhost:${port}${endpoint}`);
+    console.error(`Pipedrive MCP Server listening on port ${port}`);
+    console.error(`Streamable HTTP endpoint: http://localhost:${port}/mcp`);
+    console.error(`Legacy SSE endpoint:      http://localhost:${port}/sse`);
+    console.error(`Legacy message endpoint:  http://localhost:${port}${sseEndpoint}`);
   });
 } else {
   // Default: stdio transport
   const transport = new StdioServerTransport();
-  server.connect(transport).catch(err => {
+  createServer().connect(transport).catch(err => {
     console.error("Failed to start MCP server:", err);
     process.exit(1);
   });
