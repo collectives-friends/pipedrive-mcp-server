@@ -842,6 +842,306 @@ server.tool(
   }
 );
 
+// === WRITE TOOLS ===
+
+// Create a new deal
+// @ts-ignore - MCP SDK deep type instantiation across many tools (TS2589)
+server.tool(
+  "create-deal",
+  "Create a new deal in Pipedrive. Use get-users for ownerId, get-pipelines/get-stages for pipeline/stage IDs, and get-persons/get-organizations to link a contact.",
+  {
+    title: z.string().describe("Deal title (required)"),
+    value: z.number().optional().describe("Deal value (number)"),
+    currency: z.string().optional().describe("Currency code, e.g. DKK, EUR, USD"),
+    personId: z.number().optional().describe("Linked person ID"),
+    orgId: z.number().optional().describe("Linked organization ID"),
+    pipelineId: z.number().optional().describe("Pipeline ID"),
+    stageId: z.number().optional().describe("Stage ID"),
+    status: z.enum(['open', 'won', 'lost']).optional().describe("Deal status (default: open)"),
+    ownerId: z.number().optional().describe("Owner/user ID"),
+    expectedCloseDate: z.string().optional().describe("Expected close date (YYYY-MM-DD)"),
+    visibleTo: z.number().optional().describe("Visibility (1=owner, 3=entire company)")
+  },
+  async ({ title, value, currency, personId, orgId, pipelineId, stageId, status, ownerId, expectedCloseDate, visibleTo }) => {
+    try {
+      const newDeal: any = { title };
+      if (value !== undefined) newDeal.value = value;
+      if (currency !== undefined) newDeal.currency = currency;
+      if (personId !== undefined) newDeal.person_id = personId;
+      if (orgId !== undefined) newDeal.org_id = orgId;
+      if (pipelineId !== undefined) newDeal.pipeline_id = pipelineId;
+      if (stageId !== undefined) newDeal.stage_id = stageId;
+      if (status !== undefined) newDeal.status = status;
+      if (ownerId !== undefined) newDeal.user_id = ownerId;
+      if (expectedCloseDate !== undefined) newDeal.expected_close_date = expectedCloseDate;
+      if (visibleTo !== undefined) newDeal.visible_to = visibleTo;
+      // @ts-ignore - SDK type definitions are incomplete
+      const response = await dealsApi.addDeal(newDeal);
+      return { content: [{ type: "text", text: JSON.stringify(response.data, null, 2) }] };
+    } catch (error) {
+      console.error("Error creating deal:", error);
+      return { content: [{ type: "text", text: `Error creating deal: ${getErrorMessage(error)}` }], isError: true };
+    }
+  }
+);
+
+// Update an existing deal (incl. move stage, change value/status/owner)
+server.tool(
+  "update-deal",
+  "Update an existing deal by ID. Use this to move a deal to another stage, change value, mark won/lost, reassign owner, or relink person/organization. Only the fields you provide are changed.",
+  {
+    dealId: z.number().describe("Pipedrive deal ID (required)"),
+    title: z.string().optional().describe("New deal title"),
+    value: z.number().optional().describe("New deal value"),
+    currency: z.string().optional().describe("Currency code"),
+    personId: z.number().optional().describe("Linked person ID"),
+    orgId: z.number().optional().describe("Linked organization ID"),
+    pipelineId: z.number().optional().describe("Pipeline ID"),
+    stageId: z.number().optional().describe("Stage ID (move the deal to this stage)"),
+    status: z.enum(['open', 'won', 'lost', 'deleted']).optional().describe("Deal status"),
+    ownerId: z.number().optional().describe("Owner/user ID"),
+    expectedCloseDate: z.string().optional().describe("Expected close date (YYYY-MM-DD)"),
+    visibleTo: z.number().optional().describe("Visibility (1=owner, 3=entire company)")
+  },
+  async ({ dealId, title, value, currency, personId, orgId, pipelineId, stageId, status, ownerId, expectedCloseDate, visibleTo }) => {
+    try {
+      const updateDealRequest: any = {};
+      if (title !== undefined) updateDealRequest.title = title;
+      if (value !== undefined) updateDealRequest.value = value;
+      if (currency !== undefined) updateDealRequest.currency = currency;
+      if (personId !== undefined) updateDealRequest.person_id = personId;
+      if (orgId !== undefined) updateDealRequest.org_id = orgId;
+      if (pipelineId !== undefined) updateDealRequest.pipeline_id = pipelineId;
+      if (stageId !== undefined) updateDealRequest.stage_id = stageId;
+      if (status !== undefined) updateDealRequest.status = status;
+      if (ownerId !== undefined) updateDealRequest.user_id = ownerId;
+      if (expectedCloseDate !== undefined) updateDealRequest.expected_close_date = expectedCloseDate;
+      if (visibleTo !== undefined) updateDealRequest.visible_to = visibleTo;
+      // @ts-ignore - SDK type definitions are incomplete
+      const response = await dealsApi.updateDeal(dealId, updateDealRequest);
+      return { content: [{ type: "text", text: JSON.stringify(response.data, null, 2) }] };
+    } catch (error) {
+      console.error(`Error updating deal ${dealId}:`, error);
+      return { content: [{ type: "text", text: `Error updating deal ${dealId}: ${getErrorMessage(error)}` }], isError: true };
+    }
+  }
+);
+
+// Create a new person
+server.tool(
+  "create-person",
+  "Create a new person (contact) in Pipedrive. Email and phone are optional single values.",
+  {
+    name: z.string().describe("Person name (required)"),
+    email: z.string().optional().describe("Email address"),
+    phone: z.string().optional().describe("Phone number"),
+    orgId: z.number().optional().describe("Linked organization ID"),
+    ownerId: z.number().optional().describe("Owner/user ID"),
+    visibleTo: z.number().optional().describe("Visibility (1=owner, 3=entire company)")
+  },
+  async ({ name, email, phone, orgId, ownerId, visibleTo }) => {
+    try {
+      const newPerson: any = { name };
+      if (email !== undefined) newPerson.email = [{ value: email, primary: true }];
+      if (phone !== undefined) newPerson.phone = [{ value: phone, primary: true }];
+      if (orgId !== undefined) newPerson.org_id = orgId;
+      if (ownerId !== undefined) newPerson.owner_id = ownerId;
+      if (visibleTo !== undefined) newPerson.visible_to = visibleTo;
+      // @ts-ignore - SDK type definitions are incomplete
+      const response = await personsApi.addPerson(newPerson);
+      return { content: [{ type: "text", text: JSON.stringify(response.data, null, 2) }] };
+    } catch (error) {
+      console.error("Error creating person:", error);
+      return { content: [{ type: "text", text: `Error creating person: ${getErrorMessage(error)}` }], isError: true };
+    }
+  }
+);
+
+// Update an existing person
+server.tool(
+  "update-person",
+  "Update an existing person by ID. Only the fields you provide are changed. Setting email/phone replaces the primary value.",
+  {
+    personId: z.number().describe("Pipedrive person ID (required)"),
+    name: z.string().optional().describe("New name"),
+    email: z.string().optional().describe("Email address (replaces primary)"),
+    phone: z.string().optional().describe("Phone number (replaces primary)"),
+    orgId: z.number().optional().describe("Linked organization ID"),
+    ownerId: z.number().optional().describe("Owner/user ID"),
+    visibleTo: z.number().optional().describe("Visibility (1=owner, 3=entire company)")
+  },
+  async ({ personId, name, email, phone, orgId, ownerId, visibleTo }) => {
+    try {
+      const updatePerson: any = {};
+      if (name !== undefined) updatePerson.name = name;
+      if (email !== undefined) updatePerson.email = [{ value: email, primary: true }];
+      if (phone !== undefined) updatePerson.phone = [{ value: phone, primary: true }];
+      if (orgId !== undefined) updatePerson.org_id = orgId;
+      if (ownerId !== undefined) updatePerson.owner_id = ownerId;
+      if (visibleTo !== undefined) updatePerson.visible_to = visibleTo;
+      // @ts-ignore - SDK type definitions are incomplete
+      const response = await personsApi.updatePerson(personId, updatePerson);
+      return { content: [{ type: "text", text: JSON.stringify(response.data, null, 2) }] };
+    } catch (error) {
+      console.error(`Error updating person ${personId}:`, error);
+      return { content: [{ type: "text", text: `Error updating person ${personId}: ${getErrorMessage(error)}` }], isError: true };
+    }
+  }
+);
+
+// Create a new organization
+server.tool(
+  "create-organization",
+  "Create a new organization in Pipedrive.",
+  {
+    name: z.string().describe("Organization name (required)"),
+    ownerId: z.number().optional().describe("Owner/user ID"),
+    visibleTo: z.number().optional().describe("Visibility (1=owner, 3=entire company)")
+  },
+  async ({ name, ownerId, visibleTo }) => {
+    try {
+      const newOrganization: any = { name };
+      if (ownerId !== undefined) newOrganization.owner_id = ownerId;
+      if (visibleTo !== undefined) newOrganization.visible_to = visibleTo;
+      // @ts-ignore - SDK type definitions are incomplete
+      const response = await organizationsApi.addOrganization(newOrganization);
+      return { content: [{ type: "text", text: JSON.stringify(response.data, null, 2) }] };
+    } catch (error) {
+      console.error("Error creating organization:", error);
+      return { content: [{ type: "text", text: `Error creating organization: ${getErrorMessage(error)}` }], isError: true };
+    }
+  }
+);
+
+// Update an existing organization
+server.tool(
+  "update-organization",
+  "Update an existing organization by ID. Only the fields you provide are changed.",
+  {
+    orgId: z.number().describe("Pipedrive organization ID (required)"),
+    name: z.string().optional().describe("New name"),
+    ownerId: z.number().optional().describe("Owner/user ID"),
+    visibleTo: z.number().optional().describe("Visibility (1=owner, 3=entire company)")
+  },
+  async ({ orgId, name, ownerId, visibleTo }) => {
+    try {
+      const updateOrganization: any = {};
+      if (name !== undefined) updateOrganization.name = name;
+      if (ownerId !== undefined) updateOrganization.owner_id = ownerId;
+      if (visibleTo !== undefined) updateOrganization.visible_to = visibleTo;
+      // @ts-ignore - SDK type definitions are incomplete
+      const response = await organizationsApi.updateOrganization(orgId, updateOrganization);
+      return { content: [{ type: "text", text: JSON.stringify(response.data, null, 2) }] };
+    } catch (error) {
+      console.error(`Error updating organization ${orgId}:`, error);
+      return { content: [{ type: "text", text: `Error updating organization ${orgId}: ${getErrorMessage(error)}` }], isError: true };
+    }
+  }
+);
+
+// Add a note (to a deal, person, or organization)
+server.tool(
+  "add-note",
+  "Add a note in Pipedrive. Provide at least one of dealId, personId, or orgId to attach the note. Content supports basic HTML.",
+  {
+    content: z.string().describe("Note content (required)"),
+    dealId: z.number().optional().describe("Attach to this deal ID"),
+    personId: z.number().optional().describe("Attach to this person ID"),
+    orgId: z.number().optional().describe("Attach to this organization ID")
+  },
+  async ({ content, dealId, personId, orgId }) => {
+    try {
+      if (dealId === undefined && personId === undefined && orgId === undefined) {
+        return { content: [{ type: "text", text: "Error: provide at least one of dealId, personId, or orgId to attach the note." }], isError: true };
+      }
+      const addNoteRequest: any = { content };
+      if (dealId !== undefined) addNoteRequest.deal_id = dealId;
+      if (personId !== undefined) addNoteRequest.person_id = personId;
+      if (orgId !== undefined) addNoteRequest.org_id = orgId;
+      // @ts-ignore - SDK type definitions are incomplete
+      const response = await notesApi.addNote(addNoteRequest);
+      return { content: [{ type: "text", text: JSON.stringify(response.data, null, 2) }] };
+    } catch (error) {
+      console.error("Error adding note:", error);
+      return { content: [{ type: "text", text: `Error adding note: ${getErrorMessage(error)}` }], isError: true };
+    }
+  }
+);
+
+// Create a new activity (task/call/meeting)
+// @ts-ignore - MCP SDK deep type instantiation across many tools (TS2589)
+server.tool(
+  "create-activity",
+  "Create a new activity (task, call, meeting, etc.) in Pipedrive. Link it to a deal/person/organization via the optional IDs.",
+  {
+    subject: z.string().describe("Activity subject/title (required)"),
+    type: z.string().optional().describe("Activity type key, e.g. call, meeting, task, email, deadline (default: task)"),
+    dueDate: z.string().optional().describe("Due date (YYYY-MM-DD)"),
+    dueTime: z.string().optional().describe("Due time (HH:MM)"),
+    duration: z.string().optional().describe("Duration (HH:MM)"),
+    note: z.string().optional().describe("Note/description for the activity"),
+    done: z.boolean().optional().describe("Mark as done (default: false)"),
+    dealId: z.number().optional().describe("Linked deal ID"),
+    personId: z.number().optional().describe("Linked person ID"),
+    orgId: z.number().optional().describe("Linked organization ID"),
+    ownerId: z.number().optional().describe("Owner/user ID")
+  },
+  async ({ subject, type, dueDate, dueTime, duration, note, done, dealId, personId, orgId, ownerId }) => {
+    try {
+      const activityPostObject: any = { subject, type: type ?? 'task' };
+      if (dueDate !== undefined) activityPostObject.due_date = dueDate;
+      if (dueTime !== undefined) activityPostObject.due_time = dueTime;
+      if (duration !== undefined) activityPostObject.duration = duration;
+      if (note !== undefined) activityPostObject.note = note;
+      if (done !== undefined) activityPostObject.done = done ? 1 : 0;
+      if (dealId !== undefined) activityPostObject.deal_id = dealId;
+      if (personId !== undefined) activityPostObject.person_id = personId;
+      if (orgId !== undefined) activityPostObject.org_id = orgId;
+      if (ownerId !== undefined) activityPostObject.owner_id = ownerId;
+      // @ts-ignore - SDK type definitions are incomplete
+      const response = await activitiesApi.addActivity(activityPostObject);
+      return { content: [{ type: "text", text: JSON.stringify(response.data, null, 2) }] };
+    } catch (error) {
+      console.error("Error creating activity:", error);
+      return { content: [{ type: "text", text: `Error creating activity: ${getErrorMessage(error)}` }], isError: true };
+    }
+  }
+);
+
+// Update an existing activity (e.g. mark done)
+server.tool(
+  "update-activity",
+  "Update an existing activity by ID. Common use: mark an activity done. Only the fields you provide are changed.",
+  {
+    activityId: z.number().describe("Pipedrive activity ID (required)"),
+    subject: z.string().optional().describe("New subject"),
+    type: z.string().optional().describe("Activity type key"),
+    dueDate: z.string().optional().describe("Due date (YYYY-MM-DD)"),
+    dueTime: z.string().optional().describe("Due time (HH:MM)"),
+    note: z.string().optional().describe("Note/description"),
+    done: z.boolean().optional().describe("Mark as done/not done"),
+    ownerId: z.number().optional().describe("Owner/user ID")
+  },
+  async ({ activityId, subject, type, dueDate, dueTime, note, done, ownerId }) => {
+    try {
+      const activityPutObject: any = {};
+      if (subject !== undefined) activityPutObject.subject = subject;
+      if (type !== undefined) activityPutObject.type = type;
+      if (dueDate !== undefined) activityPutObject.due_date = dueDate;
+      if (dueTime !== undefined) activityPutObject.due_time = dueTime;
+      if (note !== undefined) activityPutObject.note = note;
+      if (done !== undefined) activityPutObject.done = done ? 1 : 0;
+      if (ownerId !== undefined) activityPutObject.owner_id = ownerId;
+      // @ts-ignore - SDK type definitions are incomplete
+      const response = await activitiesApi.updateActivity(activityId, activityPutObject);
+      return { content: [{ type: "text", text: JSON.stringify(response.data, null, 2) }] };
+    } catch (error) {
+      console.error(`Error updating activity ${activityId}:`, error);
+      return { content: [{ type: "text", text: `Error updating activity ${activityId}: ${getErrorMessage(error)}` }], isError: true };
+    }
+  }
+);
+
 // === PROMPTS ===
 
 // Prompt for getting all deals
