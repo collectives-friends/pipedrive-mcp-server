@@ -125,6 +125,8 @@ const dealsApi = withRateLimit(new pipedrive.DealsApi(apiClient));
 const personsApi = withRateLimit(new pipedrive.PersonsApi(apiClient));
 const organizationsApi = withRateLimit(new pipedrive.OrganizationsApi(apiClient));
 const pipelinesApi = withRateLimit(new pipedrive.PipelinesApi(apiClient));
+// @ts-ignore - StagesApi exists at runtime but may not be in type definitions
+const stagesApi = withRateLimit(new pipedrive.StagesApi(apiClient));
 const itemSearchApi = withRateLimit(new pipedrive.ItemSearchApi(apiClient));
 const leadsApi = withRateLimit(new pipedrive.LeadsApi(apiClient));
 // @ts-ignore - ActivitiesApi exists but may not be in type definitions
@@ -740,8 +742,7 @@ server.tool(
       const allStages = [];
       for (const pipeline of pipelines) {
         try {
-          // @ts-ignore - Type definitions for getPipelineStages are incomplete
-          const stagesResponse = await pipelinesApi.getPipelineStages(pipeline.id);
+          const stagesResponse = await stagesApi.getStages({ pipeline_id: pipeline.id });
           const stagesData = Array.isArray(stagesResponse?.data)
             ? stagesResponse.data
             : [];
