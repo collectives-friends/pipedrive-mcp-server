@@ -843,10 +843,14 @@ server.tool(
 );
 
 // === WRITE TOOLS ===
+// Registered via a loosely-typed handle: the MCP SDK's server.tool() generic
+// inference is O(n) deep in the number of tools and blows past the build
+// container's memory (TS2589 / tsc SIGABRT) once the write tools are added.
+// Casting to a loose type skips that inference. Arg shapes are runtime-verified.
+const writeServer = server as unknown as { tool: (...args: any[]) => void };
 
 // Create a new deal
-// @ts-ignore - MCP SDK deep type instantiation across many tools (TS2589)
-server.tool(
+writeServer.tool(
   "create-deal",
   "Create a new deal in Pipedrive. Use get-users for ownerId, get-pipelines/get-stages for pipeline/stage IDs, and get-persons/get-organizations to link a contact.",
   {
@@ -862,7 +866,7 @@ server.tool(
     expectedCloseDate: z.string().optional().describe("Expected close date (YYYY-MM-DD)"),
     visibleTo: z.number().optional().describe("Visibility (1=owner, 3=entire company)")
   },
-  async ({ title, value, currency, personId, orgId, pipelineId, stageId, status, ownerId, expectedCloseDate, visibleTo }) => {
+  async ({ title, value, currency, personId, orgId, pipelineId, stageId, status, ownerId, expectedCloseDate, visibleTo }: any) => {
     try {
       const newDeal: any = { title };
       if (value !== undefined) newDeal.value = value;
@@ -886,7 +890,7 @@ server.tool(
 );
 
 // Update an existing deal (incl. move stage, change value/status/owner)
-server.tool(
+writeServer.tool(
   "update-deal",
   "Update an existing deal by ID. Use this to move a deal to another stage, change value, mark won/lost, reassign owner, or relink person/organization. Only the fields you provide are changed.",
   {
@@ -903,7 +907,7 @@ server.tool(
     expectedCloseDate: z.string().optional().describe("Expected close date (YYYY-MM-DD)"),
     visibleTo: z.number().optional().describe("Visibility (1=owner, 3=entire company)")
   },
-  async ({ dealId, title, value, currency, personId, orgId, pipelineId, stageId, status, ownerId, expectedCloseDate, visibleTo }) => {
+  async ({ dealId, title, value, currency, personId, orgId, pipelineId, stageId, status, ownerId, expectedCloseDate, visibleTo }: any) => {
     try {
       const updateDealRequest: any = {};
       if (title !== undefined) updateDealRequest.title = title;
@@ -928,7 +932,7 @@ server.tool(
 );
 
 // Create a new person
-server.tool(
+writeServer.tool(
   "create-person",
   "Create a new person (contact) in Pipedrive. Email and phone are optional single values.",
   {
@@ -939,7 +943,7 @@ server.tool(
     ownerId: z.number().optional().describe("Owner/user ID"),
     visibleTo: z.number().optional().describe("Visibility (1=owner, 3=entire company)")
   },
-  async ({ name, email, phone, orgId, ownerId, visibleTo }) => {
+  async ({ name, email, phone, orgId, ownerId, visibleTo }: any) => {
     try {
       const newPerson: any = { name };
       if (email !== undefined) newPerson.email = [{ value: email, primary: true }];
@@ -958,7 +962,7 @@ server.tool(
 );
 
 // Update an existing person
-server.tool(
+writeServer.tool(
   "update-person",
   "Update an existing person by ID. Only the fields you provide are changed. Setting email/phone replaces the primary value.",
   {
@@ -970,7 +974,7 @@ server.tool(
     ownerId: z.number().optional().describe("Owner/user ID"),
     visibleTo: z.number().optional().describe("Visibility (1=owner, 3=entire company)")
   },
-  async ({ personId, name, email, phone, orgId, ownerId, visibleTo }) => {
+  async ({ personId, name, email, phone, orgId, ownerId, visibleTo }: any) => {
     try {
       const updatePerson: any = {};
       if (name !== undefined) updatePerson.name = name;
@@ -990,7 +994,7 @@ server.tool(
 );
 
 // Create a new organization
-server.tool(
+writeServer.tool(
   "create-organization",
   "Create a new organization in Pipedrive.",
   {
@@ -998,7 +1002,7 @@ server.tool(
     ownerId: z.number().optional().describe("Owner/user ID"),
     visibleTo: z.number().optional().describe("Visibility (1=owner, 3=entire company)")
   },
-  async ({ name, ownerId, visibleTo }) => {
+  async ({ name, ownerId, visibleTo }: any) => {
     try {
       const newOrganization: any = { name };
       if (ownerId !== undefined) newOrganization.owner_id = ownerId;
@@ -1014,7 +1018,7 @@ server.tool(
 );
 
 // Update an existing organization
-server.tool(
+writeServer.tool(
   "update-organization",
   "Update an existing organization by ID. Only the fields you provide are changed.",
   {
@@ -1023,7 +1027,7 @@ server.tool(
     ownerId: z.number().optional().describe("Owner/user ID"),
     visibleTo: z.number().optional().describe("Visibility (1=owner, 3=entire company)")
   },
-  async ({ orgId, name, ownerId, visibleTo }) => {
+  async ({ orgId, name, ownerId, visibleTo }: any) => {
     try {
       const updateOrganization: any = {};
       if (name !== undefined) updateOrganization.name = name;
@@ -1040,7 +1044,7 @@ server.tool(
 );
 
 // Add a note (to a deal, person, or organization)
-server.tool(
+writeServer.tool(
   "add-note",
   "Add a note in Pipedrive. Provide at least one of dealId, personId, or orgId to attach the note. Content supports basic HTML.",
   {
@@ -1049,7 +1053,7 @@ server.tool(
     personId: z.number().optional().describe("Attach to this person ID"),
     orgId: z.number().optional().describe("Attach to this organization ID")
   },
-  async ({ content, dealId, personId, orgId }) => {
+  async ({ content, dealId, personId, orgId }: any) => {
     try {
       if (dealId === undefined && personId === undefined && orgId === undefined) {
         return { content: [{ type: "text", text: "Error: provide at least one of dealId, personId, or orgId to attach the note." }], isError: true };
@@ -1069,8 +1073,7 @@ server.tool(
 );
 
 // Create a new activity (task/call/meeting)
-// @ts-ignore - MCP SDK deep type instantiation across many tools (TS2589)
-server.tool(
+writeServer.tool(
   "create-activity",
   "Create a new activity (task, call, meeting, etc.) in Pipedrive. Link it to a deal/person/organization via the optional IDs.",
   {
@@ -1086,7 +1089,7 @@ server.tool(
     orgId: z.number().optional().describe("Linked organization ID"),
     ownerId: z.number().optional().describe("Owner/user ID")
   },
-  async ({ subject, type, dueDate, dueTime, duration, note, done, dealId, personId, orgId, ownerId }) => {
+  async ({ subject, type, dueDate, dueTime, duration, note, done, dealId, personId, orgId, ownerId }: any) => {
     try {
       const activityPostObject: any = { subject, type: type ?? 'task' };
       if (dueDate !== undefined) activityPostObject.due_date = dueDate;
@@ -1109,7 +1112,7 @@ server.tool(
 );
 
 // Update an existing activity (e.g. mark done)
-server.tool(
+writeServer.tool(
   "update-activity",
   "Update an existing activity by ID. Common use: mark an activity done. Only the fields you provide are changed.",
   {
@@ -1122,7 +1125,7 @@ server.tool(
     done: z.boolean().optional().describe("Mark as done/not done"),
     ownerId: z.number().optional().describe("Owner/user ID")
   },
-  async ({ activityId, subject, type, dueDate, dueTime, note, done, ownerId }) => {
+  async ({ activityId, subject, type, dueDate, dueTime, note, done, ownerId }: any) => {
     try {
       const activityPutObject: any = {};
       if (subject !== undefined) activityPutObject.subject = subject;
