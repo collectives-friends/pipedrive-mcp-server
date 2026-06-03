@@ -1,0 +1,21 @@
+src/index.ts
+  s_b98e2c4f76737d::t_cb76d5db20340c 129
+  s_b98e2c4f76737d::t_de632f0521c30c 128
+  s_b98e2c4f76737d::t_dcdbede2a1faeb 745
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "51eae3f3e790a8622341069f016063270a1adb7f",
+  "prompts": {},
+  "sessions": {
+    "s_b98e2c4f76737d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "c383f88b-a4c0-4d30-b2cb-fa37f46934ce",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Stefan Rosenlund <mail@stefanrosenlund.dk>"
+    }
+  }
+}
